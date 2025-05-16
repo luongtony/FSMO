@@ -1,36 +1,42 @@
-# Step 1: Check Current State
-Write-Host "`nChecking current SYSVOL migration state..." -ForegroundColor Cyan
-dfsrmig /getglobalstate
-dfsrmig /getmigrationstate
+function Wait-ForDFSState {
+    param (
+        [int]$targetState,
+        [int]$timeoutSeconds = 600
+    )
 
-# Step 2: Set to 'Prepared' state
-Write-Host "`nStage 1: PREPARED - Migrating to Prepared state..." -ForegroundColor Yellow
+    $stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $output = dfsrmig /getmigrationstate
+        $outputString = $output -join "`n"
+
+        if ($outputString -match "The migration has reached a consistent state on all Domain Controllers") {
+            Write-Host "✅ State $targetState reached on all DCs." -ForegroundColor Green
+            break
+        }
+
+        if ($stopWatch.Elapsed.TotalSeconds -gt $timeoutSeconds) {
+            Write-Host "❌ Timeout waiting for state $targetState to complete. Please check replication health." -ForegroundColor Red
+            break
+        }
+
+        Write-Host "⏳ Waiting for state $targetState to complete..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 10
+    }
+}
+
+# Stage 1 - Prepared
+Write-Host "`n➡️  Stage 1: PREPARED" -ForegroundColor Cyan
 dfsrmig /setglobalstate 1
+Wait-ForDFSState -targetState 1
 
-do {
-    Start-Sleep -Seconds 60
-    $state = (dfsrmig /getmigrationstate) -join "`n"
-    Write-Host $state
-} until ($state -like "*The migration has reached a consistent state on all Domain Controllers.*")
-
-# Step 3: Set to 'Redirected' state
-Write-Host "`nStage 2: REDIRECTED - Migrating to Redirected state..." -ForegroundColor Yellow
+# Stage 2 - Redirected
+Write-Host "`n➡️  Stage 2: REDIRECTED" -ForegroundColor Cyan
 dfsrmig /setglobalstate 2
+Wait-ForDFSState -targetState 2
 
-do {
-    Start-Sleep -Seconds 60
-    $state = (dfsrmig /getmigrationstate) -join "`n"
-    Write-Host $state
-} until ($state -like "*The migration has reached a consistent state on all Domain Controllers.*")
-
-# Step 4: Set to 'Eliminated' state (removes FRS)
-Write-Host "`nStage 3: ELIMINATED - Migrating to Eliminated state..." -ForegroundColor Yellow
+# Stage 3 - Eliminated
+Write-Host "`n➡️  Stage 3: ELIMINATED" -ForegroundColor Cyan
 dfsrmig /setglobalstate 3
+Wait-ForDFSState -targetState 3
 
-do {
-    Start-Sleep -Seconds 60
-    $state = (dfsrmig /getmigrationstate) -join "`n"
-    Write-Host $state
-} until ($state -like "*The migration has reached a consistent state on all Domain Controllers.*")
-
-Write-Host "`n✅ SYSVOL replication has successfully migrated from FRS to DFS-R." -ForegroundColor Green
+Write-Host "`n🎉 SYSVOL successfully migrated to DFS-R!" -ForegroundColor Green
